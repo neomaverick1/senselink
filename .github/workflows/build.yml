@@ -1,0 +1,82 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Shared tests + screenshot tests (Robolectric)
+        run: ./gradlew :composeApp:testDebugUnitTest --no-daemon
+      - name: Release APK
+        run: ./gradlew :composeApp:assembleRelease --no-daemon
+      - run: cp composeApp/build/outputs/apk/release/composeApp-release.apk SenseLink.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: SenseLink.apk
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Shared tests on the iOS simulator (Kotlin/Native)
+        run: ./gradlew :composeApp:iosSimulatorArm64Test --no-daemon
+      - name: Generate the Xcode project
+        run: brew install xcodegen && cd iosApp && xcodegen
+      - name: Build the iPhone simulator app
+        run: |
+          cd iosApp
+          xcodebuild -project SenseLink.xcodeproj -scheme SenseLink -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO | tail -n 40
+          ditto -c -k --keepParent build/Build/Products/Debug-iphonesimulator/SenseLink.app ../SenseLink-iOS-Simulator.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator
+          path: SenseLink-iOS-Simulator.zip
+
+  release:
+    if: always() && needs.android.result == 'success'
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+          path: dist
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: ios-simulator
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: SenseLink 1.0.${{ github.run_number }}
+          make_latest: true
+          body: |
+            **Android 8+:** download `SenseLink.apk` and open it on your phone. Use the built-in simulator, or switch to Bluetooth to connect a real heart rate strap or environment sensor.
+            **iPhone simulator:** unzip `SenseLink-iOS-Simulator.zip` and drag `SenseLink.app` onto a booted simulator.
+          files: dist/*
