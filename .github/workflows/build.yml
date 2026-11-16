@@ -24,13 +24,21 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Shared tests + screenshot tests (Robolectric)
         run: ./gradlew :composeApp:testDebugUnitTest --no-daemon
-      - name: Release APK
-        run: ./gradlew :composeApp:assembleRelease --no-daemon
-      - run: cp composeApp/build/outputs/apk/release/composeApp-release.apk SenseLink.apk
+      - name: Release APK and Google Play bundle
+        run: ./gradlew :composeApp:assembleRelease :composeApp:bundleRelease --no-daemon
+      - name: Sign them
+        env:
+          UPLOAD_JKS_B64: ${{ secrets.UPLOAD_JKS_B64 }}
+          UPLOAD_STORE_PASSWORD: ${{ secrets.UPLOAD_STORE_PASSWORD }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+          UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
+        run: bash .github/sign-android.sh composeApp/build/outputs/apk/release/composeApp-release.apk SenseLink.apk composeApp/build/outputs/bundle/release/composeApp-release.aab SenseLink-Play.aab
       - uses: actions/upload-artifact@v4
         with:
           name: apk
-          path: SenseLink.apk
+          path: |
+            SenseLink.apk
+            SenseLink-Play.aab
 
   ios:
     runs-on: macos-latest
@@ -78,5 +86,6 @@ jobs:
           make_latest: true
           body: |
             **Android 8+:** download `SenseLink.apk` and open it on your phone. Use the built-in simulator, or switch to Bluetooth to connect a real heart rate strap or environment sensor.
+            **Google Play:** `SenseLink-Play.aab` is the bundle for the Play Console.
             **iPhone simulator:** unzip `SenseLink-iOS-Simulator.zip` and drag `SenseLink.app` onto a booted simulator.
           files: dist/*
